@@ -115,11 +115,16 @@ PROXY_PID=$!
 echo "[start.sh] Starting YaCy (Jetty + Solr index) on 127.0.0.1:$YACY_PORT"
 cd "$YACY_APP_DIR"
 
-# Default heap is 600 MB; bump to 1800 MB for a public-mode peer
-# (Solr index + crawler workers + DHT chunks add up).  This is below
-# our manifest memory_mb=2048 so the JVM has headroom for off-heap
-# usage.
-export javastart_Xmx=Xmx1800m
+# Default heap is 600 MB.  With a real freeworld crawl the
+# ResourceObserver auto-pauses the crawler when free heap drops
+# below 24 MB; on default heap that happens within minutes.
+#
+# YACY_JAVASTART_XMX is the env var startYACY.sh reads (NOT
+# `javastart_Xmx`, which is the *config-file key name*).  We also
+# write `javastart_Xmx=Xmx3000m` into yacy.conf via setup_admin.py
+# so the setting survives operator edits and shows up in the
+# admin UI.
+export YACY_JAVASTART_XMX=Xmx3000m
 
 # YACY_DATA overrides the data root inside YaCy (yacy.java line ~725
 # reads this env var and uses it instead of the application root).

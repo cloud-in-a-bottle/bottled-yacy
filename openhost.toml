@@ -92,11 +92,13 @@ public_paths = [
 
 [resources]
 # YaCy is a JVM app with a built-in Solr index, crawler workers, and
-# its own Jetty.  Default heap is 600 MB; we set Xmx to 1800 MB in
-# start.sh and give the container 2 GiB total to leave headroom for
-# the JVM's off-heap usage (mmapped index segments, thread stacks).
-# Bump if you plan to crawl > 10M URLs.
-memory_mb = 2048
+# its own Jetty.  Default heap is 600 MB but the crawler's
+# ResourceObserver auto-pauses jobs when free heap drops below
+# ~24 MB; with a real freeworld peer indexing many domains, 600 MB
+# fills up in minutes and the crawler stalls.  We give the
+# container 4 GiB total and set Xmx=3000m in start.sh, leaving
+# ~1 GiB for off-heap (Lucene mmaps, native libs, JVM overhead).
+memory_mb = 4096
 cpu_millicores = 2000
 
 [data]

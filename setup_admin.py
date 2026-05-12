@@ -147,6 +147,14 @@ def main() -> int:
     # nonce-fetch round-trip on every cold request and is messy to
     # cache safely.  X-Real-IP spoofing is a one-line proxy change
     # and uses a code path YaCy explicitly supports.
+    # JVM heap override.  YaCy's ResourceObserver auto-pauses crawl
+    # jobs when free heap drops below 24 MB, so the default 600 MB
+    # heap stalls a real freeworld peer in minutes.  We force a
+    # larger heap here as a belt-and-suspenders companion to the
+    # YACY_JAVASTART_XMX env var in start.sh — startYACY.sh reads
+    # YACY_JAVASTART_XMX first and falls back to this conf key.
+    java_xmx = os.environ.get("YACY_JAVASTART_XMX", "Xmx3000m")
+
     overrides = {
         "adminAccountUserName": admin_user,
         "adminAccountBase64MD5": pw_hash,
@@ -157,6 +165,7 @@ def main() -> int:
         "publicPort": public_port,
         "server.https": "false",
         "network.unit.definition": f"defaults/yacy.network.{network}.unit",
+        "javastart_Xmx": java_xmx,
     }
 
     new_text = _apply_overrides(conf_text, overrides)

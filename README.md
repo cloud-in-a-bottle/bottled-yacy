@@ -129,8 +129,11 @@ in the network.
 
 ## Resources
 
-- **Memory**: 2 GiB total, 1.8 GiB JVM heap. Bump if you plan to
-  crawl > 10M URLs.
+- **Memory**: 4 GiB container, 3 GiB JVM heap. YaCy's
+  `ResourceObserver` auto-pauses the crawler when free heap drops
+  below ~24 MB; on default 600 MB heap that happens within minutes
+  of a real freeworld crawl. 3 GiB gives plenty of headroom for
+  the in-memory crawl queue + Solr buffers.
 - **CPU**: 2 cores. YaCy's crawler is multi-threaded and Solr
   benefits from extra cores during indexing.
 - **Disk**: grows with your crawl. A few hundred MB for a fresh
