@@ -31,45 +31,19 @@ PERSIST="${OPENHOST_APP_DATA_DIR:-/data/app_data/yacy}"
 APP_NAME="${OPENHOST_APP_NAME:-yacy}"
 ZONE_DOMAIN="${OPENHOST_ZONE_DOMAIN:-localhost}"
 
-# Where YaCy thinks its data lives.  The upstream image has
-# WORKDIR /opt at runtime and the YaCy app at
-# /opt/yacy_search_server.  yacy.conf is at
-# /opt/yacy_search_server/DATA/SETTINGS/yacy.conf, where DATA is a
-# named volume in the upstream Dockerfile (VOLUME directive).
+# Where YaCy thinks its data lives.  The upstream image declares
+# /opt/yacy_search_server/DATA as a VOLUME mountpoint, which the
+# OCI runtime mounts as an anon volume we cannot replace from
+# inside the container.  Bypass it entirely by setting YACY_DATA,
+# an env var YaCy reads at startup (yacy.java line ~725:
+# `System.getenv("YACY_DATA")`) to override the data root.
 #
-# OpenHost mounts our app_data at /data/app_data/yacy.  We bind
-# YaCy's DATA dir to a sub-directory in our persistent area via a
-# symlink so YaCy's state persists across container rebuilds AND
-# is visible at the standard OpenHost data-dir path (for file-
-# browser, backups, etc.).
+# With YACY_DATA set, YaCy writes to $YACY_DATA/DATA/ instead of
+# its installation dir's DATA/.  We point YACY_DATA at the
+# persistent app_data dir; YaCy's writable state lives at
+# $OPENHOST_APP_DATA_DIR/DATA/ across container rebuilds.
 YACY_APP_DIR="/opt/yacy_search_server"
-YACY_DATA_DIR_PERSIST="$PERSIST/DATA"
-YACY_DATA_DIR_LINKED="$YACY_APP_DIR/DATA"
-
-mkdir -p "$YACY_DATA_DIR_PERSIST"
-
-# Replace the upstream DATA dir (which is a VOLUME mountpoint, but
-# we're not using that volume) with a symlink to our persisted dir.
-# If it's already a symlink to the right place, leave it.
-if [[ -L "$YACY_DATA_DIR_LINKED" ]]; then
-    current="$(readlink -f "$YACY_DATA_DIR_LINKED" || echo "")"
-    if [[ "$current" != "$YACY_DATA_DIR_PERSIST" ]]; then
-        rm -f "$YACY_DATA_DIR_LINKED"
-        ln -s "$YACY_DATA_DIR_PERSIST" "$YACY_DATA_DIR_LINKED"
-    fi
-elif [[ -d "$YACY_DATA_DIR_LINKED" ]]; then
-    # Real dir from the image; move any contents into our persisted
-    # dir (preserves any first-boot bootstrap files the image
-    # shipped) then replace with a symlink.
-    if [[ -n "$(ls -A "$YACY_DATA_DIR_LINKED" 2>/dev/null)" ]]; then
-        echo "[start.sh] Migrating pre-existing $YACY_DATA_DIR_LINKED into persistent dir"
-        cp -an "$YACY_DATA_DIR_LINKED"/. "$YACY_DATA_DIR_PERSIST"/ 2>/dev/null || true
-    fi
-    rm -rf "$YACY_DATA_DIR_LINKED"
-    ln -s "$YACY_DATA_DIR_PERSIST" "$YACY_DATA_DIR_LINKED"
-else
-    ln -s "$YACY_DATA_DIR_PERSIST" "$YACY_DATA_DIR_LINKED"
-fi
+mkdir -p "$PERSIST/DATA"
 
 # -----------------------------------------------------------------
 # Admin credentials.  Persisted across reboots.
@@ -106,7 +80,7 @@ source "$CRED_FILE"
 # -----------------------------------------------------------------
 echo "[start.sh] Bootstrapping yacy.conf"
 export YACY_APP_DIR
-export YACY_DATA_DIR="$YACY_DATA_DIR_LINKED"
+export YACY_DATA_DIR="$PERSIST/DATA"
 export YACY_ADMIN_USERNAME
 export YACY_ADMIN_PASSWORD
 # YaCy listens on this port internally (loopback only).
@@ -143,6 +117,12 @@ cd "$YACY_APP_DIR"
 # our manifest memory_mb=2048 so the JVM has headroom for off-heap
 # usage.
 export javastart_Xmx=Xmx1800m
+
+# YACY_DATA overrides the data root inside YaCy (yacy.java line ~725
+# reads this env var and uses it instead of the application root).
+# Set it to our persistent dir so DATA/ lives under app_data, not
+# under the upstream image's VOLUME-mounted /opt/.../DATA.
+export YACY_DATA="$PERSIST"
 
 /bin/sh "$YACY_APP_DIR/startYACY.sh" -f &
 YACY_PID=$!
