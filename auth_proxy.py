@@ -197,13 +197,7 @@ class AuthProxyHandler(BaseHTTPRequestHandler):
             real_ip = xff or self.client_address[0]
         cleaned_headers.append(("X-Real-IP", real_ip))
 
-        path_only = self.path.split("?", 1)[0]
-        log.info(
-            "DIAG path=%s is_owner=%s x_real_ip=%s",
-            path_only,
-            is_owner,
-            real_ip,
-        )
+
 
         transfer_encoding = self.headers.get("Transfer-Encoding", "").lower().strip()
         if transfer_encoding and transfer_encoding != "identity":
@@ -289,17 +283,6 @@ class AuthProxyHandler(BaseHTTPRequestHandler):
                 return
 
             reason = upstream.reason or ""
-            # Diagnostic logging on 401 to debug Digest-vs-Basic mismatch.
-            if upstream.status == 401:
-                www_auth = next(
-                    (v for k, v in upstream.getheaders() if k.lower() == "www-authenticate"),
-                    "(none)",
-                )
-                log.warning(
-                    "DIAG 401 from upstream for %s: WWW-Authenticate=%r",
-                    self.path,
-                    www_auth,
-                )
             try:
                 self.send_response(upstream.status, reason)
                 for key, value in upstream.getheaders():
