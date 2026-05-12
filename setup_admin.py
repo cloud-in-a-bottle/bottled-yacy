@@ -149,11 +149,16 @@ def main() -> int:
     # and uses a code path YaCy explicitly supports.
     # JVM heap override.  YaCy's ResourceObserver auto-pauses crawl
     # jobs when free heap drops below 24 MB, so the default 600 MB
-    # heap stalls a real freeworld peer in minutes.  We force a
-    # larger heap here as a belt-and-suspenders companion to the
-    # YACY_JAVASTART_XMX env var in start.sh — startYACY.sh reads
-    # YACY_JAVASTART_XMX first and falls back to this conf key.
-    java_xmx = os.environ.get("YACY_JAVASTART_XMX", "Xmx3000m")
+    # heap stalls a real freeworld peer in minutes.
+    #
+    # We launch java directly from start.sh with `-Xmx3000m` (NOT
+    # via upstream's startYACY.sh, which reads conf from the wrong
+    # path under our YACY_DATA override and falls back to a
+    # hardcoded 600 MB).  This conf entry is purely cosmetic — it
+    # shows up in YaCy's admin UI "performance" view so operators
+    # see the right setting, but the actual JVM arg comes from
+    # start.sh.
+    java_xmx = "Xmx3000m"
 
     overrides = {
         "adminAccountUserName": admin_user,

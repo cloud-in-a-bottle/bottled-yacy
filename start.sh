@@ -115,29 +115,37 @@ PROXY_PID=$!
 echo "[start.sh] Starting YaCy (Jetty + Solr index) on 127.0.0.1:$YACY_PORT"
 cd "$YACY_APP_DIR"
 
-# Default heap is 600 MB.  With a real freeworld crawl the
-# ResourceObserver auto-pauses the crawler when free heap drops
-# below 24 MB; on default heap that happens within minutes.
-#
-# YACY_JAVASTART_XMX is the env var startYACY.sh reads (NOT
-# `javastart_Xmx`, which is the *config-file key name*).  We also
-# write `javastart_Xmx=Xmx3000m` into yacy.conf via setup_admin.py
-# so the setting survives operator edits and shows up in the
-# admin UI.
-export YACY_JAVASTART_XMX=Xmx3000m
-
 # YACY_DATA overrides the data root inside YaCy (yacy.java line ~725
 # reads this env var and uses it instead of the application root).
 # Set it to our persistent dir so DATA/ lives under app_data, not
 # under the upstream image's VOLUME-mounted /opt/.../DATA.
 export YACY_DATA="$PERSIST"
 
-echo "[start.sh] YACY_JAVASTART_XMX=$YACY_JAVASTART_XMX"
-echo "[start.sh] javastart_Xmx in yacy.conf: $(grep '^javastart_Xmx=' "$PERSIST/DATA/SETTINGS/yacy.conf" 2>/dev/null)"
-echo "[start.sh] launching: bash $YACY_APP_DIR/startYACY.sh -p"
-bash "$YACY_APP_DIR/startYACY.sh" -p
+# We do NOT use upstream's startYACY.sh because it reads
+# `javastart_Xmx` from DATA/SETTINGS/yacy.conf relative to its own
+# cwd ($YACY_APP_DIR/DATA/SETTINGS/...), which is the upstream
+# image's VOLUME mountpoint — empty in our deployment because we
+# put real state at $YACY_DATA.  When the conf is missing,
+# startYACY.sh falls back to the hardcoded `-Xmx600m`, ignoring
+# both YACY_JAVASTART_XMX and our setup_admin.py-written conf.
+#
+# Replicating the small amount of work startYACY.sh does directly
+# avoids that dead-end:
+#   * Build CLASSPATH from lib/*.jar.
+#   * Pass -Xmx3000m, -server, and the other JVM args explicitly.
+#   * Launch net.yacy.yacy with stdout/stderr inherited.
+JAVA_BIN="$(command -v java)"
+[ -n "$JAVA_BIN" ] || { echo "[start.sh] FATAL: java not on PATH" >&2; exit 1; }
 
-bash "$YACY_APP_DIR/startYACY.sh" -f &
+JAVA_ARGS="-Xmx3000m -server -Djava.awt.headless=true -Dfile.encoding=UTF-8 -Dsolr.directoryFactory=solr.MMapDirectoryFactory"
+
+CLASSPATH="."
+for jar in lib/*.jar; do
+    CLASSPATH="$CLASSPATH:$jar"
+done
+
+echo "[start.sh] launching: $JAVA_BIN $JAVA_ARGS -classpath <...> net.yacy.yacy"
+"$JAVA_BIN" $JAVA_ARGS -classpath "$CLASSPATH" net.yacy.yacy &
 YACY_PID=$!
 
 # -----------------------------------------------------------------
