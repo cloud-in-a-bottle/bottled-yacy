@@ -1,38 +1,44 @@
-"""OpenHost auto-login auth-proxy for YaCy.
-
-Pattern A-ish (trusted header → injected Authorization).
+"""OpenHost SSO sidecar for YaCy via X-Real-IP localhost-spoofing.
 
 Sits between the OpenHost router and YaCy's web UI (Jetty on
-127.0.0.1:8090).  Behavior:
+127.0.0.1).  Behavior:
 
-  * Strip any client-supplied ``Authorization`` and ``X-OpenHost-*``
-    headers (defense in depth — the OpenHost router stamps the real
-    ``X-OpenHost-Is-Owner`` fresh on every request).
+  * Strip any client-supplied ``X-Real-IP``, ``Authorization``, and
+    ``X-OpenHost-*`` headers (defense in depth — the OpenHost router
+    stamps the real ``X-OpenHost-Is-Owner`` fresh on every request).
+  * Strip ``Referer`` (YaCy's localhost-admin check requires
+    Referer to be empty or also-localhost to honor the bypass;
+    a public-domain Referer would defeat us).
   * If the request has ``X-OpenHost-Is-Owner: true`` (zone owner
-    visiting), inject ``Authorization: Basic <base64(admin:pw)>``
-    so YaCy treats them as the authenticated admin on
-    `_p` (admin-only) pages.  Anonymous public pages don't care.
-  * Otherwise (anonymous internet visitor or peer-protocol caller),
-    pass through unchanged.  Public-search and ``/yacy/*`` peer
-    endpoints don't require auth.
+    visiting): set ``X-Real-IP: 127.0.0.1`` before forwarding to
+    YaCy.  Combined with ``adminAccountForLocalhost=true`` (set in
+    setup_admin.py), YaCy treats the request as the authenticated
+    admin and lets it through on _p (admin-only) pages.
+  * Otherwise (anonymous internet visitor or peer-protocol caller):
+    set ``X-Real-IP`` to the actual remote IP from
+    ``X-Forwarded-For``.  YaCy sees a real remote IP and applies
+    normal access rules (anonymous visitors can hit
+    ``/yacysearch`` and ``/yacy/*`` but not ``_p`` admin pages).
   * ``/_healthz`` is served locally as a static 200 so the OpenHost
     healthcheck doesn't depend on YaCy's JVM warm-up (~30s on cold
     start).
 
-YaCy supports both Basic and Digest auth on the admin pages
-(``YaCyLegacyCredential.java``); we use Basic because the upstream
-hash format stored in ``adminAccountBase64MD5`` is
-``MD5(user:realm:password)`` and YaCy server-side will recompute
-the same hash from our plaintext-in-Basic credentials and compare.
+Why X-Real-IP and not HTTP Basic/Digest replay: YaCy's Jetty
+defaults to Digest auth on the wire (verified empirically: 401s
+include ``WWW-Authenticate: Digest``).  Injecting a Basic
+credential doesn't authenticate.  Implementing Digest in the proxy
+would need a nonce-fetch round-trip on every cold request.
+X-Real-IP spoofing uses a code path YaCy explicitly supports
+(``RequestHeader.client()`` reads X-Real-IP), is a one-line proxy
+change, and aligns with how YaCy itself documents reverse-proxy
+deployments (with nginx ``proxy_set_header X-Real-IP $remote_addr``).
 """
 
 from __future__ import annotations
 
-import base64
 import http.client
 import logging
 import os
-import re
 import socket
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -63,14 +69,23 @@ HOP_BY_HOP_HEADERS = frozenset(
 # client-supplied versions itself before stamping its own, but
 # defense in depth — don't depend on the router's behavior.
 #
-# Authorization is stripped so a non-owner can't smuggle in admin
-# creds.  We re-inject our own when the owner header is present.
+# X-Real-IP: stripped because we set it ourselves to either
+#   127.0.0.1 (owner → localhost-admin bypass) or the real client IP
+#   (anon → public visitor).  A forged client-supplied X-Real-IP
+#   would let any anonymous visitor claim localhost-admin.
+# Authorization: stripped to prevent any leak/forge attempts; we
+#   don't use it ourselves.
+# Referer: YaCy's localhost-admin bypass requires Referer to be
+#   empty or also-localhost.  Stripping ensures the bypass works.
 ALWAYS_STRIP_HEADERS = frozenset(
     h.lower()
     for h in (
         OWNER_HEADER_NAME,
         USER_HEADER_NAME,
         "Authorization",
+        "X-Real-IP",
+        "X-Real-Ip",
+        "Referer",
     )
 )
 
@@ -90,37 +105,6 @@ logging.basicConfig(
 log = logging.getLogger("auth_proxy")
 
 
-def _read_admin_creds(cred_file: str) -> tuple[str, str] | None:
-    """Read YACY_ADMIN_USERNAME / YACY_ADMIN_PASSWORD from start.sh's
-    on-disk credentials file.  Re-parsed on every request so an
-    operator who rotates the credentials (edit the file, restart
-    YaCy via passwd.sh) doesn't need a sidecar restart.
-    """
-    try:
-        with open(cred_file, encoding="utf-8") as fh:
-            content = fh.read()
-    except FileNotFoundError:
-        return None
-    username = password = None
-    for line in content.splitlines():
-        m = re.match(
-            r"^\s*(?:export\s+)?(YACY_ADMIN_USERNAME|YACY_ADMIN_PASSWORD)\s*=\s*(.*?)\s*$",
-            line,
-        )
-        if not m:
-            continue
-        key, val = m.group(1), m.group(2)
-        if len(val) >= 2 and val[0] == val[-1] and val[0] in ("'", '"'):
-            val = val[1:-1]
-        if key == "YACY_ADMIN_USERNAME":
-            username = val
-        elif key == "YACY_ADMIN_PASSWORD":
-            password = val
-    if username and password:
-        return username, password
-    return None
-
-
 def _strip_headers(
     headers: Iterable[tuple[str, str]], drop: AbstractSet[str]
 ) -> list[tuple[str, str]]:
@@ -131,7 +115,6 @@ def _strip_headers(
 class AuthProxyHandler(BaseHTTPRequestHandler):
     upstream_host: str = "127.0.0.1"
     upstream_port: int = 8093
-    cred_file: str = "/data/app_data/yacy/admin-credentials.txt"
 
     def log_message(self, format: str, *args) -> None:  # noqa: A002, N802
         log.info("%s - " + format, self.address_string(), *args)
@@ -198,34 +181,28 @@ class AuthProxyHandler(BaseHTTPRequestHandler):
             cleaned_headers.append(("Host", forwarded_host))
         cleaned_headers.append(("X-Forwarded-Proto", "https"))
 
-        # Owner-only: inject Basic auth so the admin pages let us
-        # through.  We strip any client-supplied Authorization above,
-        # so a hostile client can't forge admin access by supplying
-        # their own header.
+        # X-Real-IP injection.
+        #   * Owner: lie and say the request came from localhost.
+        #     YaCy + adminAccountForLocalhost=true gives admin rights.
+        #   * Anon: pass through the real client IP from
+        #     X-Forwarded-For so YaCy can apply normal access rules
+        #     and log searches with the correct remote IP.
         is_owner = self.headers.get(OWNER_HEADER_NAME, "").lower() == "true"
-        injected_auth = False
         if is_owner:
-            creds = _read_admin_creds(self.cred_file)
-            if creds is not None:
-                username, password = creds
-                token = base64.b64encode(
-                    f"{username}:{password}".encode("utf-8")
-                ).decode("ascii")
-                cleaned_headers.append(("Authorization", f"Basic {token}"))
-                injected_auth = True
-            else:
-                log.warning(
-                    "owner request: credentials file missing or unreadable at %s; "
-                    "admin pages will return 401",
-                    self.cred_file,
-                )
+            real_ip = "127.0.0.1"
+        else:
+            # X-Forwarded-For is "client, proxy1, proxy2"; we want
+            # the leftmost (original client).
+            xff = self.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+            real_ip = xff or self.client_address[0]
+        cleaned_headers.append(("X-Real-IP", real_ip))
 
         path_only = self.path.split("?", 1)[0]
         log.info(
-            "DIAG path=%s is_owner=%s auth_injected=%s",
+            "DIAG path=%s is_owner=%s x_real_ip=%s",
             path_only,
             is_owner,
-            injected_auth,
+            real_ip,
         )
 
         transfer_encoding = self.headers.get("Transfer-Encoding", "").lower().strip()
@@ -373,14 +350,9 @@ def main() -> int:
         return 1
 
     upstream_host = os.environ.get("AUTH_PROXY_UPSTREAM_HOST", "127.0.0.1").strip()
-    cred_file = os.environ.get(
-        "AUTH_PROXY_CRED_FILE",
-        "/data/app_data/yacy/admin-credentials.txt",
-    )
 
     AuthProxyHandler.upstream_host = upstream_host
     AuthProxyHandler.upstream_port = upstream_port
-    AuthProxyHandler.cred_file = cred_file
 
     try:
         server = IPv4ThreadingServer(("0.0.0.0", listen_port), AuthProxyHandler)
@@ -392,11 +364,10 @@ def main() -> int:
         )
         return 1
     log.info(
-        "listening on 0.0.0.0:%d -> %s:%d (creds=%s)",
+        "listening on 0.0.0.0:%d -> %s:%d (X-Real-IP localhost-spoof mode)",
         listen_port,
         upstream_host,
         upstream_port,
-        cred_file,
     )
     try:
         server.serve_forever()

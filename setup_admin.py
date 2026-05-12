@@ -124,10 +124,33 @@ def main() -> int:
     # matches what YaCy will look up.  Without this, an operator who
     # tweaks adminRealm after install would silently invalidate every
     # admin login attempt.
+    #
+    # adminAccountForLocalhost=true is the *core SSO mechanism* —
+    # YaCy treats any request whose source IP (X-Real-IP or
+    # remote_addr) is loopback as the authenticated admin.  Our
+    # auth-proxy:
+    #   * Strips client-supplied X-Real-IP (defense in depth);
+    #     OpenHost router strips it too.
+    #   * For owner-marked requests: sets X-Real-IP=127.0.0.1
+    #     (forcing the localhost-admin bypass).
+    #   * For anon requests: sets X-Real-IP to the actual remote IP
+    #     (so YaCy sees a public visitor and applies normal auth on
+    #     _p pages — which means anon visitors get 401 if they try
+    #     to access admin pages, but anonymous /yacysearch and the
+    #     /yacy/* peer protocol still work).
+    #
+    # Why this instead of HTTP Basic/Digest replay: YaCy's Jetty
+    # config defaults to Digest auth on the wire (verified
+    # empirically: it returns "WWW-Authenticate: Digest..." on 401),
+    # so injecting a Basic credential doesn't authenticate.
+    # Implementing Digest replay in the proxy would require a
+    # nonce-fetch round-trip on every cold request and is messy to
+    # cache safely.  X-Real-IP spoofing is a one-line proxy change
+    # and uses a code path YaCy explicitly supports.
     overrides = {
         "adminAccountUserName": admin_user,
         "adminAccountBase64MD5": pw_hash,
-        "adminAccountForLocalhost": "false",
+        "adminAccountForLocalhost": "true",
         "adminAccountAllPages": "false",
         "adminRealm": realm,
         "port": container_port,

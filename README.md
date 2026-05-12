@@ -41,25 +41,36 @@ YaCy peer (freeworld) → host :8090/tcp → container :8090 (YaCy)
 
 ## SSO
 
-Pattern A (trusted-header → Authorization injection):
+X-Real-IP localhost-spoofing:
 
-- A random admin password is generated on first boot and persisted
-  at `$OPENHOST_APP_DATA_DIR/admin-credentials.txt`.
-- On every owner request, the auth-proxy strips any client-supplied
-  `Authorization` and `X-OpenHost-*` headers, then injects
-  `Authorization: Basic base64(admin:<pw>)`.
-- YaCy validates the Basic-auth credentials against its internal
-  `MD5(user:realm:password)` hash and treats the request as the
-  admin user.
-- Non-owner (anonymous) traffic is passed through unchanged so
-  public search and peer-to-peer protocol work.
+- `setup_admin.py` writes `adminAccountForLocalhost=true` into
+  `DATA/SETTINGS/yacy.conf`. That tells YaCy: "treat any request
+  whose client IP is loopback as the authenticated admin."
+- On owner requests (router sets `X-OpenHost-Is-Owner: true`), the
+  auth-proxy sets `X-Real-IP: 127.0.0.1` on the upstream request.
+  YaCy reads this header (per its standard reverse-proxy support
+  in `RequestHeader.client()`) and treats the request as
+  localhost → auto-admin.
+- On anonymous requests, the auth-proxy sets `X-Real-IP` to the
+  real client IP from `X-Forwarded-For`. YaCy applies normal
+  rules: public pages are accessible, `_p` admin pages return 401.
+- A randomly-generated admin password is also written (in YaCy's
+  `MD5(user:realm:pw)` hash format) so YaCy's CLI tools and the
+  classic Digest auth path work too, for operators who SSH in.
+
+Why not HTTP Basic / Digest replay? YaCy's Jetty defaults to
+Digest on the wire (confirmed by `WWW-Authenticate: Digest...` on
+401s). Replaying Digest requires a nonce-fetch round-trip and is
+fiddly to cache. X-Real-IP is the one-line solution YaCy itself
+documents for nginx-style reverse proxies.
 
 ### Credentials file
 
-`$OPENHOST_APP_DATA_DIR/admin-credentials.txt` is a credential. The
-entire data dir is already sensitive (contains your peer's private
-key, search index, crawl history); the password file doesn't
-expand the threat model. Treat the whole dir as secret.
+`$OPENHOST_APP_DATA_DIR/admin-credentials.txt` is a credential
+(holds the plaintext admin password). The entire data dir is
+already sensitive (contains your peer's private key, search
+index, crawl history); the password file doesn't expand the
+threat model. Treat the whole dir as secret.
 
 If `file-browser` is installed on the same zone with the default
 `access_all_data` permission, it can read this file. Either avoid
@@ -77,8 +88,9 @@ sed -i "s/^export YACY_ADMIN_PASSWORD=.*/export YACY_ADMIN_PASSWORD='<new>'/" \
 oh app reload yacy
 ```
 
-Alternatively, run YaCy's own `bin/passwd.sh <new>` inside the
-container, then update the cred file to match.
+Note: the OpenHost SSO path uses X-Real-IP spoofing, so rotating
+the password won't affect owner access in the browser — it only
+affects YaCy's CLI tools and direct Digest-auth logins.
 
 ## Ports
 
