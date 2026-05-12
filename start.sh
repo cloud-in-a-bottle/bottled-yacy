@@ -132,7 +132,12 @@ export YACY_JAVASTART_XMX=Xmx3000m
 # under the upstream image's VOLUME-mounted /opt/.../DATA.
 export YACY_DATA="$PERSIST"
 
-/bin/sh "$YACY_APP_DIR/startYACY.sh" -f &
+echo "[start.sh] YACY_JAVASTART_XMX=$YACY_JAVASTART_XMX"
+echo "[start.sh] javastart_Xmx in yacy.conf: $(grep '^javastart_Xmx=' "$PERSIST/DATA/SETTINGS/yacy.conf" 2>/dev/null)"
+echo "[start.sh] launching: bash $YACY_APP_DIR/startYACY.sh -p"
+bash "$YACY_APP_DIR/startYACY.sh" -p
+
+bash "$YACY_APP_DIR/startYACY.sh" -f &
 YACY_PID=$!
 
 # -----------------------------------------------------------------
