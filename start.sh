@@ -92,6 +92,11 @@ export YACY_PUBLIC_PORT=8090
 export YACY_NETWORK_DEFINITION=freeworld
 
 python3 /opt/openhost-yacy/setup_admin.py
+# Debug: dump the fields we manage so we can verify they took.
+echo "[start.sh] --- yacy.conf admin/auth/network fields ---"
+grep -E "^(adminAccountUserName|adminAccountBase64MD5|adminAccountForLocalhost|adminAccountAllPages|adminRealm|port|publicPort|server.https|network.unit.definition)=" \
+    "$PERSIST/DATA/SETTINGS/yacy.conf" 2>/dev/null || echo "(yacy.conf missing!)"
+echo "[start.sh] --- end ---"
 
 # -----------------------------------------------------------------
 # Start the auth-proxy first.  It serves /_healthz immediately so

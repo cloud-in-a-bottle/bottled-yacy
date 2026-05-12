@@ -50,10 +50,28 @@ health_check = "/_healthz"
 #   /env/, /js/, /css/, /img/ — static assets the search pages load.
 #   /robots.txt, /favicon.ico — standard.
 #   /_healthz     — OpenHost router liveness probe.
+#
+# OpenHost matches each entry as "exact path OR path-with-trailing-/"
+# prefix (see compute_space/web/routes/proxy.py:_is_public_path).
+# That means "/yacysearch" matches `/yacysearch` and `/yacysearch/...`
+# but NOT `/yacysearch.html` — extensions don't match.  We list the
+# common YaCy public-search content types explicitly.
 public_paths = [
     "/yacy/",
-    "/yacysearch",
-    "/yacysearchitem",
+    "/yacysearch.html",
+    "/yacysearch.json",
+    "/yacysearch.rss",
+    "/yacysearch.atom",
+    "/yacysearch.txt",
+    "/yacysearch.xsl",
+    "/yacysearch_location.html",
+    "/yacysearch_location.rss",
+    "/yacysearch_location.xml",
+    "/yacysearch_location.kml",
+    "/yacysearchitem.html",
+    "/yacysearchitem.json",
+    "/yacysearchitem.atom",
+    "/yacysearchitem.txt",
     "/suggest.json",
     "/Network.html",
     "/Network.json",

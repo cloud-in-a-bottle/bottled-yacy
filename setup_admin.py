@@ -120,11 +120,16 @@ def main() -> int:
 
     pw_hash = _yacy_md5(admin_user, realm, admin_password)
 
+    # Pin adminRealm explicitly so the hash we just computed always
+    # matches what YaCy will look up.  Without this, an operator who
+    # tweaks adminRealm after install would silently invalidate every
+    # admin login attempt.
     overrides = {
         "adminAccountUserName": admin_user,
         "adminAccountBase64MD5": pw_hash,
         "adminAccountForLocalhost": "false",
         "adminAccountAllPages": "false",
+        "adminRealm": realm,
         "port": container_port,
         "publicPort": public_port,
         "server.https": "false",
