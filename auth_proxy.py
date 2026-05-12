@@ -203,6 +203,7 @@ class AuthProxyHandler(BaseHTTPRequestHandler):
         # so a hostile client can't forge admin access by supplying
         # their own header.
         is_owner = self.headers.get(OWNER_HEADER_NAME, "").lower() == "true"
+        injected_auth = False
         if is_owner:
             creds = _read_admin_creds(self.cred_file)
             if creds is not None:
@@ -211,12 +212,21 @@ class AuthProxyHandler(BaseHTTPRequestHandler):
                     f"{username}:{password}".encode("utf-8")
                 ).decode("ascii")
                 cleaned_headers.append(("Authorization", f"Basic {token}"))
+                injected_auth = True
             else:
                 log.warning(
                     "owner request: credentials file missing or unreadable at %s; "
                     "admin pages will return 401",
                     self.cred_file,
                 )
+
+        path_only = self.path.split("?", 1)[0]
+        log.info(
+            "DIAG path=%s is_owner=%s auth_injected=%s",
+            path_only,
+            is_owner,
+            injected_auth,
+        )
 
         transfer_encoding = self.headers.get("Transfer-Encoding", "").lower().strip()
         if transfer_encoding and transfer_encoding != "identity":
@@ -302,6 +312,17 @@ class AuthProxyHandler(BaseHTTPRequestHandler):
                 return
 
             reason = upstream.reason or ""
+            # Diagnostic logging on 401 to debug Digest-vs-Basic mismatch.
+            if upstream.status == 401:
+                www_auth = next(
+                    (v for k, v in upstream.getheaders() if k.lower() == "www-authenticate"),
+                    "(none)",
+                )
+                log.warning(
+                    "DIAG 401 from upstream for %s: WWW-Authenticate=%r",
+                    self.path,
+                    www_auth,
+                )
             try:
                 self.send_response(upstream.status, reason)
                 for key, value in upstream.getheaders():
