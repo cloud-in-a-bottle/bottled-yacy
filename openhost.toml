@@ -1,0 +1,92 @@
+[app]
+name = "yacy"
+version = "0.1.0"
+description = "YaCy (decentralized P2P search engine) packaged for OpenHost in freeworld mode. The peer joins the public YaCy network, crawls and indexes content, and serves search results to other peers as well as anonymous internet visitors. The admin/config UI is auto-logged-in for the zone owner via an SSO sidecar; public-search and P2P-protocol endpoints are passthrough."
+authors = ["Andrew Laack <andrew@laack.co>"]
+
+[runtime.container]
+image = "Dockerfile"
+# OpenHost-routed HTTP port.  Auth-proxy sidecar listens here, stamps
+# Basic auth on owner navigations to admin pages, and proxies all
+# other traffic (public search, P2P /yacy/* protocol) verbatim to
+# YaCy on 127.0.0.1:8090.
+port = 8080
+
+# YaCy peer-to-peer protocol port.  Other YaCy peers in the freeworld
+# network try to reach us at this port for `hello`, DHT transfer,
+# remote search, and seedlist sync.  Published directly by OpenHost
+# on 0.0.0.0:8090 so they can reach us without going through the
+# HTTPS-only router (the peer protocol is plain HTTP).
+#
+# `publicPort` in YaCy's config is overridden in start.sh to advertise
+# this same number, so peers can find us.
+[[ports]]
+label = "yacy-p2p"
+container_port = 8090
+host_port = 8090
+
+[routing]
+# Auth-proxy serves /_healthz as a static 200, decoupled from YaCy's
+# JVM warmup (cold start ~30s on first boot).
+health_check = "/_healthz"
+
+# Paths reachable without zone_auth.
+#
+#   /yacy/*       — peer-to-peer protocol endpoints (hello, query,
+#                   transferRWI, transferURL, search.html, etc.).
+#                   Other peers in the network hit these to gossip,
+#                   transfer DHT chunks, and run distributed searches.
+#                   MUST be public or we can't participate in freeworld.
+#   /yacysearch*  — public search results (HTML, JSON, RSS, Atom).
+#                   Letting anonymous visitors search is the whole
+#                   point of a public search-engine deployment.
+#   /yacysearchitem* — individual result rendering helpers used by
+#                   yacysearch.html templates.
+#   /suggest.json — autocomplete API consumed by yacysearch.html JS.
+#   /Network.html, /Network.json, /Network.xml — public peer-network
+#                   info pages (no admin data; widely scraped by
+#                   yacystats.de etc.).
+#   /opensearchdescription.xml — browser OpenSearch plugin advertisement.
+#   /env/, /js/, /css/, /img/ — static assets the search pages load.
+#   /robots.txt, /favicon.ico — standard.
+#   /_healthz     — OpenHost router liveness probe.
+public_paths = [
+    "/yacy/",
+    "/yacysearch",
+    "/yacysearchitem",
+    "/suggest.json",
+    "/Network.html",
+    "/Network.json",
+    "/Network.xml",
+    "/opensearchdescription.xml",
+    "/env/",
+    "/js/",
+    "/css/",
+    "/img/",
+    "/robots.txt",
+    "/favicon.ico",
+    "/_healthz",
+]
+
+[resources]
+# YaCy is a JVM app with a built-in Solr index, crawler workers, and
+# its own Jetty.  Default heap is 600 MB; we set Xmx to 1800 MB in
+# start.sh and give the container 2 GiB total to leave headroom for
+# the JVM's off-heap usage (mmapped index segments, thread stacks).
+# Bump if you plan to crawl > 10M URLs.
+memory_mb = 2048
+cpu_millicores = 2000
+
+[data]
+# Persistent state under /data/app_data/yacy/:
+#   * DATA/             — YaCy's data dir (Solr index, crawl queue,
+#                         peer seed cache, SETTINGS/yacy.conf).
+#                         Bind-mounted at /opt/yacy_search_server/DATA.
+#   * admin-credentials.txt
+#                       — generated admin password.  THIS IS A
+#                         CREDENTIAL but the entire data dir is
+#                         already sensitive (peer private key,
+#                         crawl history, content cache); treat the
+#                         whole dir as secret.
+app_data = true
+app_temp_data = false

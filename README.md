@@ -1,0 +1,164 @@
+# openhost-yacy
+
+[YaCy](https://yacy.net/) — decentralized peer-to-peer search engine —
+packaged as an OpenHost app in **freeworld (public)** mode.
+
+## What this gives you
+
+Your zone runs a YaCy peer that:
+
+- Joins the public YaCy `freeworld` network (the global decentralized
+  index used by yacy.net's demo peer and other community installs).
+- Serves public search results at `https://yacy.<zone>/yacysearch.html`.
+- Lets you crawl pages, build your own index, and contribute to the
+  shared DHT.
+- Auto-logs the zone owner into the admin UI for crawl config,
+  blacklist management, network status, etc.
+
+## Telemetry
+
+None. From yacy.net: *"YaCy has a strong connection to privacy-aware
+tools. As such it does not collect personalized data. It also has no
+'phoning-home' integrated."*
+
+## Topology
+
+```
+browser → OpenHost router (zone_auth check; stamps
+                            X-OpenHost-Is-Owner: true)
+        → container :8080 (auth-proxy)
+              ├─ owner → +Authorization: Basic admin:<pw> → YaCy
+              └─ anon  → passthrough → YaCy
+
+anonymous search visitor → router (public_paths matched) →
+                            container :8080 (auth-proxy) →
+                            127.0.0.1:8090 (YaCy Jetty)
+
+YaCy peer (freeworld) → host :8090/tcp → container :8090 (YaCy)
+                        (P2P protocol: /yacy/hello, /yacy/search,
+                         /yacy/transferRWI, etc.)
+```
+
+## SSO
+
+Pattern A (trusted-header → Authorization injection):
+
+- A random admin password is generated on first boot and persisted
+  at `$OPENHOST_APP_DATA_DIR/admin-credentials.txt`.
+- On every owner request, the auth-proxy strips any client-supplied
+  `Authorization` and `X-OpenHost-*` headers, then injects
+  `Authorization: Basic base64(admin:<pw>)`.
+- YaCy validates the Basic-auth credentials against its internal
+  `MD5(user:realm:password)` hash and treats the request as the
+  admin user.
+- Non-owner (anonymous) traffic is passed through unchanged so
+  public search and peer-to-peer protocol work.
+
+### Credentials file
+
+`$OPENHOST_APP_DATA_DIR/admin-credentials.txt` is a credential. The
+entire data dir is already sensitive (contains your peer's private
+key, search index, crawl history); the password file doesn't
+expand the threat model. Treat the whole dir as secret.
+
+If `file-browser` is installed on the same zone with the default
+`access_all_data` permission, it can read this file. Either avoid
+installing file-browser alongside, or revoke its `access_all_data`
+permission.
+
+### Rotating the admin password
+
+```bash
+# Edit the cred file with the new password:
+sed -i "s/^export YACY_ADMIN_PASSWORD=.*/export YACY_ADMIN_PASSWORD='<new>'/" \
+  /home/host/.openhost/local_compute_space/persistent_data/app_data/yacy/admin-credentials.txt
+
+# Then restart the container so setup_admin.py re-applies the hash:
+oh app reload yacy
+```
+
+Alternatively, run YaCy's own `bin/passwd.sh <new>` inside the
+container, then update the cred file to match.
+
+## Ports
+
+- **8080/tcp** (OpenHost-routed, HTTPS-terminated): web UI + REST API
+- **8090/tcp** (published directly to the public internet): the YaCy
+  peer-to-peer protocol. Other freeworld peers reach us at
+  `<zone>:8090` for the `/yacy/*` endpoints.
+
+The HTTPS-routed `:8080` is also a fully functional YaCy front end
+— any path that goes there reaches YaCy after auth-proxy treatment.
+The split exists because the OpenHost router only handles HTTPS
+and many YaCy peers in the network speak plain HTTP only.
+
+## Public paths
+
+The OpenHost router lets the following paths through without
+zone_auth (matches `routing.public_paths` in `openhost.toml`):
+
+| Path prefix | Used by |
+|---|---|
+| `/yacy/` | Other freeworld peers (P2P protocol) |
+| `/yacysearch` | Public search results (HTML/JSON/RSS/Atom) |
+| `/yacysearchitem` | Result-rendering helpers used by search HTML |
+| `/suggest.json` | Autocomplete suggestions |
+| `/Network.html`, `/Network.json`, `/Network.xml` | Public peer-network info |
+| `/opensearchdescription.xml` | Browser OpenSearch plugin |
+| `/env/`, `/js/`, `/css/`, `/img/` | Static assets |
+| `/robots.txt`, `/favicon.ico` | Standard |
+| `/_healthz` | OpenHost router liveness probe |
+
+YaCy's per-page auth model is "any URL containing `_p` is admin-only
+(401 if not authenticated), everything else is public." The
+`public_paths` list is a superset of what's public on YaCy itself
+plus the P2P-protocol endpoints YaCy needs reachable to participate
+in the network.
+
+## Resources
+
+- **Memory**: 2 GiB total, 1.8 GiB JVM heap. Bump if you plan to
+  crawl > 10M URLs.
+- **CPU**: 2 cores. YaCy's crawler is multi-threaded and Solr
+  benefits from extra cores during indexing.
+- **Disk**: grows with your crawl. A few hundred MB for a fresh
+  peer; tens of GB if you do serious crawling.
+
+## What's *not* included
+
+- **Intranet mode** (`network.unit.name=intranet`) — for a private,
+  zone-only search portal without joining the public network.
+  Switch in `DATA/SETTINGS/yacy.conf`'s `network.unit.definition` if
+  desired; `start.sh` re-applies `freeworld` on every boot, so
+  you'd need to disable that line in `setup_admin.py` or change
+  the `YACY_NETWORK_DEFINITION` env in `start.sh`.
+- **HTTPS on the peer port** — the YaCy peer protocol uses plain
+  HTTP. TLS is terminated by the OpenHost router for the web UI
+  on port 8080 only.
+- **wkhtmltopdf for PDF export** — the upstream image has it but
+  it requires X libs that may not be cleanly available in our
+  rootless container. The "export to PDF" feature in YaCy may not
+  work; everything else does.
+
+## Files
+
+```
+openhost.toml           manifest (port 8080 routed; TCP 8090 published)
+Dockerfile              yacy/yacy_search_server:latest + python3 + scripts
+start.sh                bootstrap (creds, symlink DATA dir, supervisor)
+setup_admin.py          one-shot yacy.conf renderer
+auth_proxy.py           Pattern A SSO sidecar (Authorization injection)
+README.md               this file
+```
+
+## Authoring notes
+
+- Built per the OpenHost `openhost-app` skill (Pattern A — trusted
+  header → injected Authorization).
+- YaCy's admin auth uses `MD5(user:realm:password)` stored in
+  `adminAccountBase64MD5`; `setup_admin.py` computes that
+  server-side and writes it directly into `yacy.conf` (preferred
+  path per upstream's `bin/passwd.sh` when YaCy is not running).
+- `publicPort` is set equal to the OpenHost `host_port` so peers
+  in the freeworld network can reach us at the same number they
+  see in our seed.
