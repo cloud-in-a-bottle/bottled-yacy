@@ -20,10 +20,14 @@ port = 8080
 #
 # `publicPort` in YaCy's config is overridden in start.sh to advertise
 # this same number, so peers can find us.
+#
+# host_port 8090 is the YaCy default, but on andrew-1 there's a
+# host-level service already on 8090, so we pick 8093.  publicPort
+# in start.sh is set to match so peers advertise the same number.
 [[ports]]
 label = "yacy-p2p"
-container_port = 8090
-host_port = 8090
+container_port = 8093
+host_port = 8093
 
 [routing]
 # Auth-proxy serves /_healthz as a static 200, decoupled from YaCy's

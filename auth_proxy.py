@@ -130,7 +130,7 @@ def _strip_headers(
 
 class AuthProxyHandler(BaseHTTPRequestHandler):
     upstream_host: str = "127.0.0.1"
-    upstream_port: int = 8090
+    upstream_port: int = 8093
     cred_file: str = "/data/app_data/yacy/admin-credentials.txt"
 
     def log_message(self, format: str, *args) -> None:  # noqa: A002, N802
@@ -346,7 +346,7 @@ def _port_from_env(name: str, default: int) -> int:
 def main() -> int:
     try:
         listen_port = _port_from_env("AUTH_PROXY_LISTEN_PORT", 8080)
-        upstream_port = _port_from_env("AUTH_PROXY_UPSTREAM_PORT", 8090)
+        upstream_port = _port_from_env("AUTH_PROXY_UPSTREAM_PORT", 8093)
     except ValueError as exc:
         log.error("invalid port configuration: %s", exc)
         return 1

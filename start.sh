@@ -83,12 +83,15 @@ export YACY_APP_DIR
 export YACY_DATA_DIR="$PERSIST/DATA"
 export YACY_ADMIN_USERNAME
 export YACY_ADMIN_PASSWORD
-# YaCy listens on this port internally (loopback only).
-export YACY_PORT=8090
+# YaCy listens on this port internally.  Must match [[ports]]
+# entry's container_port in openhost.toml so the published port
+# bind reaches YaCy.  We use 8093 because andrew-1 (and possibly
+# other hosts) have a host-level service on the YaCy default 8090.
+export YACY_PORT=8093
 # Advertise this same port to peers (and clients) — it matches
 # host_port in openhost.toml's [[ports]] entry so external peers
-# can reach us at <zone-public-ip>:8090.
-export YACY_PUBLIC_PORT=8090
+# can reach us at <zone-public-ip>:8093.
+export YACY_PUBLIC_PORT=8093
 export YACY_NETWORK_DEFINITION=freeworld
 
 python3 /opt/openhost-yacy/setup_admin.py
