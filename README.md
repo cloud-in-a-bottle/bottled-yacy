@@ -1,7 +1,7 @@
-# openhost-yacy
+# bottled-yacy
 
 [YaCy](https://yacy.net/) — decentralized peer-to-peer search engine —
-packaged as an OpenHost app in **freeworld (public)** mode.
+packaged as a Cloud in a Bottle app in **freeworld (public)** mode.
 
 ## What this gives you
 
@@ -88,25 +88,25 @@ sed -i "s/^export YACY_ADMIN_PASSWORD=.*/export YACY_ADMIN_PASSWORD='<new>'/" \
 oh app reload yacy
 ```
 
-Note: the OpenHost SSO path uses X-Real-IP spoofing, so rotating
+Note: the Cloud in a Bottle SSO path uses X-Real-IP spoofing, so rotating
 the password won't affect owner access in the browser — it only
 affects YaCy's CLI tools and direct Digest-auth logins.
 
 ## Ports
 
-- **8080/tcp** (OpenHost-routed, HTTPS-terminated): web UI + REST API
+- **8080/tcp** (Cloud in a Bottle-routed, HTTPS-terminated): web UI + REST API
 - **8090/tcp** (published directly to the public internet): the YaCy
   peer-to-peer protocol. Other freeworld peers reach us at
   `<zone>:8090` for the `/yacy/*` endpoints.
 
 The HTTPS-routed `:8080` is also a fully functional YaCy front end
 — any path that goes there reaches YaCy after auth-proxy treatment.
-The split exists because the OpenHost router only handles HTTPS
+The split exists because the Cloud in a Bottle router only handles HTTPS
 and many YaCy peers in the network speak plain HTTP only.
 
 ## Public paths
 
-The OpenHost router lets the following paths through without
+The Cloud in a Bottle router lets the following paths through without
 zone_auth (matches `routing.public_paths` in `openhost.toml`):
 
 | Path prefix | Used by |
@@ -119,7 +119,7 @@ zone_auth (matches `routing.public_paths` in `openhost.toml`):
 | `/opensearchdescription.xml` | Browser OpenSearch plugin |
 | `/env/`, `/js/`, `/css/`, `/img/` | Static assets |
 | `/robots.txt`, `/favicon.ico` | Standard |
-| `/_healthz` | OpenHost router liveness probe |
+| `/_healthz` | Cloud in a Bottle router liveness probe |
 
 YaCy's per-page auth model is "any URL containing `_p` is admin-only
 (401 if not authenticated), everything else is public." The
@@ -148,7 +148,7 @@ in the network.
   you'd need to disable that line in `setup_admin.py` or change
   the `YACY_NETWORK_DEFINITION` env in `start.sh`.
 - **HTTPS on the peer port** — the YaCy peer protocol uses plain
-  HTTP. TLS is terminated by the OpenHost router for the web UI
+  HTTP. TLS is terminated by the Cloud in a Bottle router for the web UI
   on port 8080 only.
 - **wkhtmltopdf for PDF export** — the upstream image has it but
   it requires X libs that may not be cleanly available in our
@@ -168,12 +168,12 @@ README.md               this file
 
 ## Authoring notes
 
-- Built per the OpenHost `openhost-app` skill (Pattern A — trusted
+- Built per the Cloud in a Bottle `openhost-app` skill (Pattern A — trusted
   header → injected Authorization).
 - YaCy's admin auth uses `MD5(user:realm:password)` stored in
   `adminAccountBase64MD5`; `setup_admin.py` computes that
   server-side and writes it directly into `yacy.conf` (preferred
   path per upstream's `bin/passwd.sh` when YaCy is not running).
-- `publicPort` is set equal to the OpenHost `host_port` so peers
+- `publicPort` is set equal to the Cloud in a Bottle `host_port` so peers
   in the freeworld network can reach us at the same number they
   see in our seed.
