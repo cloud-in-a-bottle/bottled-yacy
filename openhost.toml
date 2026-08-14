@@ -1,7 +1,7 @@
 [app]
 name = "yacy"
 version = "0.1.0"
-description = "YaCy (decentralized P2P search engine) packaged for OpenHost in freeworld mode. The peer joins the public YaCy network, crawls and indexes content, and serves search results to other peers as well as anonymous internet visitors. The admin/config UI is auto-logged-in for the zone owner via an SSO sidecar; public-search and P2P-protocol endpoints are passthrough."
+description = "YaCy (decentralized P2P search engine) packaged for Cloud in a Bottle in freeworld mode. The peer joins the public YaCy network, crawls and indexes content, and serves search results to other peers as well as anonymous internet visitors. The admin/config UI is auto-logged-in for the zone owner via an SSO sidecar; public-search and P2P-protocol endpoints are passthrough."
 authors = ["Andrew Laack <andrew@laack.co>"]
 
 [runtime.container]
